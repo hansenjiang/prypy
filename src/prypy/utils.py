@@ -42,3 +42,19 @@ def get_item_paths(path: Path) -> list[Path]:
         List of paths to items within directory.
     """
     return list(path.iterdir())
+
+
+def tab_level(line: str) -> int:
+    """Return the tab level of the current line.
+
+    Parameters
+    ----------
+    line : str
+        Module line to be inspected.
+
+    Returns
+    -------
+    int
+        Number of indents to beginning of line content.
+    """
+    return max(len(line.split("\t")), len(line.split("    "))) - 1
