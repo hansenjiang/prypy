@@ -8,6 +8,7 @@
 from __future__ import annotations
 from typing import Any, Self, Union, Optional
 from pathlib import Path
+import operator
 
 from prypy import utils
 
@@ -111,7 +112,7 @@ class Module:
             line[:-1] if len(line) > 0 else line
             for line in open(path, mode="r").readlines()
         ]
-        levels = []
+        tab_levels = [module]
 
         # Iterate over each line of code
         i = 0
@@ -127,9 +128,11 @@ class Module:
                 continue
             # Skip multi-line strings
             elif '"""' in line:
-                # If line is variable declaration, store if constant
-                if ("=" in line.split('"""')[0]) and (
-                    line.split('"""')[0].split("=")[0].strip().isupper()
+                # If line is variable declaration, store if module-level constant
+                if (
+                    ("=" in line.split('"""')[0])
+                    and (line.split('"""')[0].split("=")[0].strip().isupper())
+                    and (utils.tab_level(line) == 0)
                 ):
                     constant_name = line.split('"""')[0].split("=")[0].strip()
                     constant_str = line.split('"""')[1].strip()
@@ -146,9 +149,9 @@ class Module:
                             constant_str += "\n" + line.strip()
 
                     # Create and store constant
-                    constant = Variable(constant_name, str, constant_str, module)
-                    # TODO Handle levels
-                    module.constants.append(constant)
+                    module.constants.append(
+                        Variable(constant_name, str, constant_str, module)
+                    )
 
                 # Otherwise skip string
                 else:
@@ -174,18 +177,37 @@ class Module:
 
                 # Add constants
                 if ("=" in line) and ("(" not in line):
-                    constant = Variable.from_line(line, module)
-                    module.constants.append(constant)
+                    module.constants.append(Variable.from_line(line, module))
 
             # Add classes
             elif "class " in line:
-                pass
+                # If class inherits
+                if "(" in line:
+                    class_name = line.split("class")[1].split("(")[0].strip()
+                else:
+                    class_name = line.split("class")[1].split(":")[0].strip()
+
+                i += 1
+                line = lines[i]
+                while (
+                    (utils.tab_level(line) == 1)
+                    and (len(line.strip()) > 0)
+                    and (i < len(lines))
+                ):
+                    i += 1
+                    line = lines[i]
+
+                #
+                tab_levels.append(class_name)
+                tab_levels = [module]
 
             # Add functions
             elif "def " in line:
                 pass
 
             i += 1
+
+        return module
 
 
 class Package:
@@ -194,12 +216,41 @@ class Package:
         name: str,
         modules: list[Module],
         subpackages: list[Self],
-        parent: Repository,
+        parent: Union[Repository, Self],
     ):
         self.name = name
         self.modules = modules
         self.subpackages = subpackages
         self.parent = parent
+
+    def __str__(self) -> str:
+        pkg_str = f"{self.name}\n"
+        corner = "├"
+
+        # Only return name if package contains no modules or subpackages
+        if len(self.modules) == 0 and len(self.subpackages) == 0:
+            return pkg_str
+
+        # Iterate over subpackages
+        for subpackage in self.subpackages:
+            if (subpackage.name == self.subpackages[-1].name) and (
+                len(self.modules) == 0
+            ):
+                corner = "└"
+            pkg_str += f"{corner}─── {subpackage.name}\n"
+            pkg_str += "\n".join(
+                ["│    " + str_line for str_line in str(subpackage).split("\n")[1:-1]]
+            )
+            pkg_str += "\n"
+
+        # Iterate over modules
+        for module in self.modules:
+            if module.name == self.modules[-1].name:
+                corner = "└"
+            pkg_str += f"{corner}─── {module.name}\n"
+
+        # Return str representing package
+        return pkg_str
 
     @classmethod
     def from_path(cls, path: Path, parent: Union[Package, Repository]) -> Self:
@@ -225,6 +276,10 @@ class Package:
                 if item.suffix == ".py":
                     package.modules.append(Module.from_path(item, package))
 
+        # Sort items by name
+        package.subpackages.sort(key=operator.attrgetter("name"))
+        package.modules.sort(key=operator.attrgetter("name"))
+
         # Return primary package
         return package
 
@@ -236,8 +291,8 @@ class Repository:
         self.path = path
 
     def __str__(self) -> str:
-        repo_str = f"repository: {self.name}\n"
-        repo_str += f"\tsource: {self.source.name}"
+        repo_str = f"\n══════════ {self.name} ══════════\n"
+        repo_str += f"{str(self.source)}"
         return repo_str
 
     @classmethod
@@ -265,12 +320,10 @@ class Repository:
                 f"No source package discovered in repository {path.name}."
             )
 
-        # TODO remove
-        print(repository)
-
         return repository
 
 
 if __name__ == "__main__":
     path = Path("/home/hansen/projects/gjw/morse/morse-pipeline").resolve()
     repo = Repository.from_path(path)
+    print(repo)
